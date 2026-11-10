@@ -3,8 +3,6 @@ package transfer
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,21 +25,19 @@ func (s *Service) Send(ctx context.Context, peer Peer, paths []string) error {
 	if err != nil {
 		return err
 	}
-	if peer.Protocol != "https" && peer.Protocol != "http" {
-		return errors.New("设备传输协议不受支持")
+	if peer.Protocol != "http" {
+		return errors.New("设备未启用 HTTP 局域网模式")
 	}
-	if net.ParseIP(peer.Address) == nil {
-		return errors.New("设备地址不是有效 IP")
+	ip := net.ParseIP(peer.Address)
+	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback()) {
+		return errors.New("设备地址不是局域网 IP")
 	}
 	if peer.Port <= 0 {
 		peer.Port = 53317
 	}
 	base := peer.Protocol + "://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.Port))
 	data, _ := json.Marshal(prepareUpload{Info: s.self, Files: files})
-	client, _, err := clientForPeer(peer)
-	if err != nil {
-		return err
-	}
+	client := &http.Client{CheckRedirect: rejectRedirect}
 	approval, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(approval, http.MethodPost, base+"/api/localsend/v2/prepare-upload", strings.NewReader(string(data)))
@@ -125,13 +121,13 @@ func (s *Service) CreateLink(paths []string) (string, error) {
 	s.mu.Lock()
 	s.share = &session{files: files, paths: local, tokens: map[string]string{"share": token}, expires: time.Now().Add(10 * time.Minute)}
 	s.mu.Unlock()
-	query := url.Values{"pin": {token}, "fp": {s.self.Fingerprint}}
-	return "https://" + net.JoinHostPort(ip, strconv.Itoa(s.config.Port)) + "/?" + query.Encode(), nil
+	query := url.Values{"pin": {token}}
+	return "http://" + net.JoinHostPort(ip, strconv.Itoa(s.config.Port)) + "/?" + query.Encode(), nil
 }
 
 func (s *Service) DownloadLink(ctx context.Context, link string, dir string) error {
 	parsed, err := url.Parse(link)
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.Query().Get("pin") == "" || parsed.Query().Get("fp") == "" {
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Hostname() == "" || parsed.Query().Get("pin") == "" {
 		return errors.New("无效的局域网分享链接")
 	}
 	ip := net.ParseIP(parsed.Hostname())
@@ -158,10 +154,7 @@ func (s *Service) DownloadLink(ctx context.Context, link string, dir string) err
 	if err != nil {
 		return err
 	}
-	client, _, err := clientForPeer(Peer{Protocol: "https", Fingerprint: parsed.Query().Get("fp")})
-	if err != nil {
-		return err
-	}
+	client := &http.Client{CheckRedirect: rejectRedirect}
 	res, err := client.Do(req)
 	if err != nil {
 		return err
@@ -235,39 +228,8 @@ func (s *Service) DownloadLink(ctx context.Context, link string, dir string) err
 	return nil
 }
 
-// clientForPeer 以公告中的证书指纹校验自签证书；手动 IP 探测随后会比对 info 指纹。
-func clientForPeer(peer Peer) (*http.Client, *string, error) {
-	if peer.Protocol == "http" {
-		return &http.Client{}, nil, nil
-	}
-	if peer.Protocol != "https" {
-		return nil, nil, errors.New("不支持的传输协议")
-	}
-	fingerprint := ""
-	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}}
-	transport.TLSClientConfig.VerifyPeerCertificate = func(raw [][]byte, _ [][]*x509.Certificate) error {
-		if len(raw) != 1 {
-			return errors.New("设备证书链无效")
-		}
-		cert, err := x509.ParseCertificate(raw[0])
-		if err != nil {
-			return err
-		}
-		if time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
-			return errors.New("设备证书已过期")
-		}
-		if err = cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
-			return err
-		}
-		sum := sha256.Sum256(raw[0])
-		fingerprint = hex.EncodeToString(sum[:])
-		if peer.Fingerprint != "" && !strings.EqualFold(peer.Fingerprint, fingerprint) {
-			return errors.New("设备证书指纹不匹配")
-		}
-		return nil
-	}
-	return &http.Client{Transport: transport}, &fingerprint, nil
-}
+// rejectRedirect 防止局域网链接把文件请求重定向到外部地址。
+func rejectRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 
 type progressReader struct {
 	reader io.Reader

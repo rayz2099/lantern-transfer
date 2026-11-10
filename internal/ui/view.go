@@ -302,7 +302,7 @@ func (a *App) settingsPage(c *ui.Context) {
 			}
 		})
 		ui.Box(c).Height(1).Background(line)
-		ui.Text(c, "接收文件前会弹出确认。分享链接仅供可信局域网使用，10 分钟后失效。").FontSize(11).TextColor(muted)
+		ui.Text(c, "HTTP 传输未加密，仅供可信局域网使用。接收前需确认，链接 10 分钟后失效。").FontSize(11).TextColor(muted)
 	})
 }
 

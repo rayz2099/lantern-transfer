@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -30,13 +29,6 @@ func testMux(s *Service) *http.ServeMux {
 }
 
 func testServer(s *Service) *httptest.Server { return httptest.NewServer(testMux(s)) }
-
-func testTLSServer(s *Service) *httptest.Server {
-	server := httptest.NewUnstartedServer(testMux(s))
-	server.TLS = &tls.Config{Certificates: []tls.Certificate{s.certificate}}
-	server.StartTLS()
-	return server
-}
 
 func peerFromURL(t *testing.T, raw string) Peer {
 	t.Helper()
@@ -163,13 +155,13 @@ func TestDownloadLinkRequiresLocalIPAndValidToken(t *testing.T) {
 	hash := sha256.Sum256(content)
 	serverService := New(Config{OnIncoming: func(context.Context, Incoming) bool { return true }})
 	serverService.share = &session{files: map[string]FileMeta{"x": {ID: "x", Name: "shared.txt", Size: int64(len(content)), SHA256: hex.EncodeToString(hash[:])}}, paths: map[string]string{"x": file}, tokens: map[string]string{"share": "secret"}, expires: time.Now().Add(time.Minute)}
-	server := testTLSServer(serverService)
+	server := testServer(serverService)
 	defer server.Close()
-	link := server.URL + "/?pin=wrong&fp=" + serverService.self.Fingerprint
+	link := server.URL + "/?pin=wrong"
 	if err := client.DownloadLink(context.Background(), link, ""); err == nil {
 		t.Fatal("invalid token accepted")
 	}
-	link = server.URL + "/?pin=secret&fp=" + serverService.self.Fingerprint
+	link = server.URL + "/?pin=secret"
 	if err := client.DownloadLink(context.Background(), link, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -179,29 +171,32 @@ func TestDownloadLinkRequiresLocalIPAndValidToken(t *testing.T) {
 	}
 }
 
-func TestHTTPSProbeAndSendPinsCertificate(t *testing.T) {
+func TestHTTPProbeAndSend(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(source, []byte("secure"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	dest := t.TempDir()
 	receiver := New(Config{DownloadDir: dest, OnIncoming: func(context.Context, Incoming) bool { return true }})
-	server := testTLSServer(receiver)
+	server := testServer(receiver)
 	defer server.Close()
 	endpoint := peerFromURL(t, server.URL)
 	sender := New(Config{})
+	if _, err := sender.Probe(context.Background(), "8.8.8.8", 53317); err == nil {
+		t.Fatal("public IP accepted")
+	}
 	peer, err := sender.Probe(context.Background(), endpoint.Address, endpoint.Port)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if peer.Fingerprint != receiver.self.Fingerprint {
-		t.Fatal("probe fingerprint mismatch")
+	if peer.Protocol != "http" || peer.Address != endpoint.Address {
+		t.Fatal("probe returned wrong peer")
 	}
-	peer.Fingerprint = strings.Repeat("0", 64)
+	peer.Protocol = "https"
 	if err = sender.Send(context.Background(), peer, []string{source}); err == nil {
-		t.Fatal("wrong fingerprint accepted")
+		t.Fatal("HTTPS peer accepted in HTTP-only mode")
 	}
-	peer.Fingerprint = receiver.self.Fingerprint
+	peer.Protocol = "http"
 	if err = sender.Send(context.Background(), peer, []string{source}); err != nil {
 		t.Fatal(err)
 	}

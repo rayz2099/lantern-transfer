@@ -10,7 +10,7 @@ Lantern Transfer is a light desktop app for direct file transfers on a local net
 - Review recent transfer metadata on this device and clear its history.
 - Receive signed updates from GitHub Releases, with an install prompt.
 
-Files move directly between devices. There is no account, cloud upload, or relay. Both devices must be on a reachable local network, and their firewalls must allow the app's inbound connection.
+Files move directly between devices over HTTP. There is no account, cloud upload, or relay. Use 0.0.1 only on a trusted local network: file contents and transfer metadata are not encrypted. Both devices must be on a reachable local network, and their firewalls must allow the app's inbound connection.
 
 ## Install
 
@@ -19,7 +19,7 @@ Download the package for your system from [Releases](https://github.com/rayz2099
 Use the application only on a network whose other devices you trust. A copied LAN download link grants access to the selected files until it expires.
 The link opens in Lantern Transfer, not a web browser. Empty folders and interrupted transfers are not preserved in this release.
 
-The transport follows LocalSend v2 endpoints, but interoperability with the official LocalSend clients has not yet been verified on physical devices.
+The transport follows LocalSend v2 endpoint shapes over HTTP. Official LocalSend clients normally use HTTPS, so interoperability with their default configuration is outside the 0.0.1 scope.
 
 ## Development
 

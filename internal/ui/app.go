@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -312,8 +313,9 @@ func (a *App) downloadLink() {
 }
 
 func linkHost(link string) string {
-	if parts := strings.SplitN(strings.TrimPrefix(strings.TrimPrefix(link, "https://"), "http://"), "/", 2); len(parts) > 0 {
-		return parts[0]
+	parsed, err := url.Parse(link)
+	if err == nil && parsed.Host != "" {
+		return parsed.Host
 	}
 	return link
 }

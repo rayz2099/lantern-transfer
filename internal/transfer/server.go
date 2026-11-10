@@ -3,7 +3,6 @@ package transfer
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -63,8 +62,7 @@ func (s *Service) Start() error {
 	s.mu.Lock()
 	s.started = true
 	s.mu.Unlock()
-	tlsListener := tls.NewListener(listener, &tls.Config{Certificates: []tls.Certificate{s.certificate}, MinVersion: tls.VersionTLS13})
-	go func() { _ = s.server.Serve(tlsListener) }()
+	go func() { _ = s.server.Serve(listener) }()
 	return nil
 }
 
