@@ -1,0 +1,6 @@
+build/
+.mygo/
+mygo-update.key
+*.p12
+*.pfx
+.DS_Store

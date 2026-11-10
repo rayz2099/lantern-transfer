@@ -1,0 +1,62 @@
+name: Release
+
+"on":
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check release configuration
+        shell: bash
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(jq -r .version mygo.json)"
+          jq -e '.updates.publicKey | length > 0' mygo.json > /dev/null
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          fi
+
+  build:
+    needs: draft-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows x86_64, os: windows-latest, platform: windows/amd64 }
+          - { name: macOS ARM64, os: macos-latest, platform: darwin/arm64 }
+          - { name: Linux x86_64, os: ubuntu-latest, platform: linux/amd64 }
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and upload signed updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        shell: bash
+        run: go tool mygo build -platform "${{ matrix.platform }}" -upload
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

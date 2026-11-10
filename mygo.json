@@ -1,0 +1,14 @@
+{
+  "name": "Lantern Transfer",
+  "slug": "lantern-transfer",
+  "identifier": "dev.rayz2099.lanterntransfer",
+  "version": "0.0.1",
+  "license": "MIT",
+  "main": "./cmd/lantern",
+  "out": "build",
+  "linux": {
+    "comment": "Local network file transfer",
+    "categories": ["Network", "Utility"],
+    "webview": false
+  }
+}
