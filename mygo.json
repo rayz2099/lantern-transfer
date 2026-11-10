@@ -4,6 +4,10 @@
   "identifier": "dev.rayz2099.lanterntransfer",
   "version": "0.0.1",
   "license": "MIT",
+  "updates": {
+    "publicKey": "mLy8GZCnZFMVoJWO1XS4HdluPHDqZjvTM1NXIVJGBVo=",
+    "github": "rayz2099/lantern-transfer"
+  },
   "main": "./cmd/lantern",
   "out": "build",
   "linux": {
