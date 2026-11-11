@@ -21,7 +21,7 @@ import (
 )
 
 func (s *Service) Send(ctx context.Context, peer Peer, paths []string) error {
-	files, local, err := collectFiles(paths)
+	files, local, err := collectFiles(ctx, paths)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *Service) Send(ctx context.Context, peer Peer, paths []string) error {
 
 // CreateLink 只公开所选文件且十分钟失效，下载仍须发送方逐次确认。
 func (s *Service) CreateLink(paths []string) (string, error) {
-	files, local, err := collectFiles(paths)
+	files, local, err := collectFiles(context.Background(), paths)
 	if err != nil {
 		return "", err
 	}
@@ -246,11 +246,26 @@ func (p *progressReader) Read(buf []byte) (int, error) {
 	return n, err
 }
 
-// collectFiles 把目录展开为相对路径，文件名在不同系统间保持一致。
-func collectFiles(paths []string) (map[string]FileMeta, map[string]string, error) {
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextReader) Read(buf []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(buf)
+}
+
+// collectFiles 在校验阶段响应取消，避免大文件准备过程锁住下一次操作。
+func collectFiles(ctx context.Context, paths []string) (map[string]FileMeta, map[string]string, error) {
 	files := make(map[string]FileMeta)
 	local := make(map[string]string)
 	for _, root := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		root = filepath.Clean(root)
 		if _, err := os.Stat(root); err != nil {
 			return nil, nil, err
@@ -258,6 +273,9 @@ func collectFiles(paths []string) (map[string]FileMeta, map[string]string, error
 		base := filepath.Base(root)
 		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
 				return err
 			}
 			if entry.IsDir() {
@@ -283,7 +301,7 @@ func collectFiles(paths []string) (map[string]FileMeta, map[string]string, error
 				return err
 			}
 			hash := sha256.New()
-			_, err = io.Copy(hash, f)
+			_, err = io.Copy(hash, contextReader{ctx: ctx, r: f})
 			f.Close()
 			if err != nil {
 				return err

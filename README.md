@@ -4,8 +4,8 @@ Lantern Transfer is a light desktop app for direct file transfers on a local net
 
 ## Features
 
-- Discover nearby desktop devices by hostname, or connect by IP address.
-- Send files and folders after the receiver approves the transfer.
+- Discover nearby desktop devices by hostname, or connect by IP address from More.
+- Choose files or folders, then click a device to send after receiver approval.
 - Copy a 10-minute LAN download link for another Lantern Transfer client to paste.
 - Review recent transfer metadata on this device and clear its history.
 - Receive signed updates from GitHub Releases, with an install prompt.

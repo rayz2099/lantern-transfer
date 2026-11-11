@@ -36,6 +36,7 @@ type App struct {
 	history          []HistoryItem
 	clearAlert       bool
 	needsDownloadDir bool
+	cancelTransfer   context.CancelFunc
 }
 
 // New 建立 UI 状态；网络服务在窗口可接收回调后启动。
@@ -100,6 +101,9 @@ func (a *App) onPeers(peers []transfer.Peer) {
 func (a *App) onProgress(p transfer.Progress) {
 	a.win.Update(func() {
 		a.progress = p
+		if p.Direction == "receive" {
+			a.status = "正在接收 " + p.File
+		}
 	})
 }
 
@@ -108,10 +112,13 @@ func (a *App) onComplete(p transfer.Progress, err error) {
 		return
 	}
 	a.win.Update(func() {
+		a.progress = transfer.Progress{}
 		result := "成功"
 		if err != nil {
 			result = "失败"
 			a.status = "接收失败: " + err.Error()
+		} else {
+			a.status = "已接收 " + p.File
 		}
 		a.addHistory(HistoryItem{Time: time.Now(), Direction: "接收", Peer: p.Peer, Name: p.File, Size: p.Total, Result: result})
 	})
@@ -194,25 +201,36 @@ func (a *App) send() {
 	}
 	paths := append([]string(nil), a.paths...)
 	manual := strings.TrimSpace(a.manual) != ""
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancelTransfer = cancel
 	a.busy = true
-	a.status = "正在连接接收设备"
+	a.progress = transfer.Progress{}
+	a.status = "正在准备传输"
 	go func() {
+		defer cancel()
 		var err error
 		if manual {
-			peer, err = a.service.Probe(context.Background(), peer.Address, peer.Port)
+			peer, err = a.service.Probe(ctx, peer.Address, peer.Port)
 		}
 		if err == nil {
-			err = a.service.Send(context.Background(), peer, paths)
+			err = a.service.Send(ctx, peer, paths)
 		}
 		a.win.Update(func() {
 			a.busy = false
+			a.cancelTransfer = nil
+			a.progress = transfer.Progress{}
 			result := "成功"
 			if err != nil {
 				result = "失败"
-				a.status = "发送失败: " + err.Error()
+				if ctx.Err() != nil {
+					a.status = "传输已取消"
+				} else {
+					a.status = "发送失败: " + err.Error()
+				}
 				a.addHistory(HistoryItem{Time: time.Now(), Direction: "发送", Peer: peer.Hostname, Name: fmt.Sprintf("%d 个项目", len(paths)), Result: result})
 			} else {
 				a.status = "发送完成"
+				a.tab = pageNearby
 				for _, path := range paths {
 					var size int64
 					if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
@@ -220,12 +238,28 @@ func (a *App) send() {
 					}
 					a.addHistory(HistoryItem{Time: time.Now(), Direction: "发送", Peer: peer.Hostname, Name: filepath.Base(path), Size: size, Result: result})
 				}
+				a.paths = nil
+				a.selected = ""
 			}
 		})
 	}()
 }
 
-func (a *App) pickFiles(directory bool) {
+// chooseDevice 将设备头像直接作为发送动作，未选内容时先唤起文件选择。
+func (a *App) chooseDevice(peer transfer.Peer) {
+	if a.busy {
+		return
+	}
+	a.selected = peer.Address
+	a.manual = ""
+	if len(a.paths) == 0 {
+		a.pickFiles(false, true)
+		return
+	}
+	a.send()
+}
+
+func (a *App) pickFiles(directory, sendAfter bool) {
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent: a.win, Title: "选择要发送的内容", Multiple: !directory, Directory: directory,
@@ -236,6 +270,9 @@ func (a *App) pickFiles(directory bool) {
 				return
 			}
 			a.queue(paths)
+			if sendAfter && len(paths) > 0 {
+				a.send()
+			}
 		})
 	}()
 }
@@ -295,17 +332,28 @@ func (a *App) downloadLink() {
 		return
 	}
 	a.busy = true
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancelTransfer = cancel
+	a.progress = transfer.Progress{}
 	a.status = "正在从分享链接下载"
 	go func() {
-		err := a.service.DownloadLink(context.Background(), link, a.download)
+		defer cancel()
+		err := a.service.DownloadLink(ctx, link, a.download)
 		a.win.Update(func() {
 			a.busy = false
+			a.cancelTransfer = nil
+			a.progress = transfer.Progress{}
 			result := "成功"
 			if err != nil {
 				result = "失败"
-				a.status = "下载失败: " + err.Error()
+				if ctx.Err() != nil {
+					a.status = "下载已取消"
+				} else {
+					a.status = "下载失败: " + err.Error()
+				}
 			} else {
 				a.status = "下载完成"
+				a.tab = pageNearby
 			}
 			a.addHistory(HistoryItem{Time: time.Now(), Direction: "下载", Peer: linkHost(link), Name: "分享链接", Result: result})
 		})

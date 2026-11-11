@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -77,6 +78,18 @@ func TestSendPreservesFolderAndExistingFile(t *testing.T) {
 	newFile, err := os.ReadFile(filepath.Join(dest, "folder", "a (1).txt"))
 	if err != nil || string(newFile) != "new content" {
 		t.Fatalf("transferred file invalid: %q, %v", newFile, err)
+	}
+}
+
+func TestCollectFilesHonorsCancellation(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "large.txt")
+	if err := os.WriteFile(file, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := collectFiles(ctx, []string{file}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
 	}
 }
 
